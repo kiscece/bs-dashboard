@@ -1,26 +1,41 @@
 import numpy as np
 
-def compute_greeks(S, V_all, dS, dt):
-    """
-    Compute Delta and Gamma at t=0 from the numerical solution.
- 
-    Delta = ∂V/∂S  ≈ (V_{i+1} - V_{i-1}) / (2 dS)
-    Gamma = ∂²V/∂S² ≈ (V_{i+1} - 2V_i + V_{i-1}) / dS²
- 
-    Returns arrays of same length as S (NaN at boundaries).
+def compute_greeks(S: np.ndarray, V_all: np.ndarray, dS: float, dt: float):
+    """ 
+    Compute option Greeks (Delta, Gamma, Theta) from a finite-difference solution.
+
+    Greeks are evaluated at t = 0 using central finite differences:
+
+        Delta ≈ (V_{i+1} - V_{i-1}) / (2 dS)
+        Gamma ≈ (V_{i+1} - 2V_i + V_{i-1}) / dS²
+        Theta ≈ (V(t+dt) - V(t)) / dt
+
+    Parameters:
+        S      : array_like
+            Asset price grid
+    V_all  : ndarray
+            Option values of shape (Nt+1, Ns+1)
+        dS     : float
+            Spatial step
+        dt     : float
+            Time step
+
+    Returns:
+        delta, gamma, theta : ndarray
+            Arrays of same length as S (NaN at boundaries)
     """
 
-    V0 = V_all[0, :]  # option values at t=0, shape (Ns+1,)
+    V0 = V_all[0, :] 
+    # Boundaries left as NaN due to lack of neighboring points
     delta = np.full_like(V0, np.nan)
     gamma = np.full_like(V0, np.nan)
  
-    #finite difference approximations, along S
     delta[1:-1] = (V0[2:] - V0[:-2]) / (2 * dS)  
     gamma[1:-1] = (V0[2:] - 2 * V0[1:-1] + V0[:-2]) / dS**2
 
-    #finite difference approx along t 
+    # Forward difference in time (theta) 
     theta = np.full_like(V0, np.nan)
-    theta = ((V_all[1, :] - V_all[0, :]) / dt)/365  # daily
+    theta = -((V_all[1, :] - V_all[0, :]) / dt)/365   #Negative sign ensures consistency with standard financial definition
     
  
     return delta, gamma, theta

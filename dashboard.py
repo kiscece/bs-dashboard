@@ -1,19 +1,21 @@
 """
-Black-Scholes Interactive Dashboard
-====================================
-Run with:  python dashboard.py
-Then open: http://localhost:8050 in your browser
+Black–Scholes Interactive Dashboard
 
-Dependencies:
-    pip install dash dash-bootstrap-components plotly yfinance scipy numpy pandas
+Features:
+- PDE pricing (Rannacher + Crank–Nicolson)
+- Market calibration (via Yahoo Finance)
+- Volatility smile visualization
+- Greeks computation
+
+Run:
+    python dashboard.py
+    → http://localhost:8050
 """
 
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from scipy.stats import norm
 from scipy.optimize import minimize_scalar
-from scipy.sparse import diags
 
 import yfinance as yf
 
@@ -264,6 +266,7 @@ def run_calibration(_, ticker):
         return res, status, round(res["S"])
     except Exception as e:
         traceback.print_exc()   # ← prints full traceback to terminal
+        print(f"[ERROR] Calibration failed for {ticker}: {e}")
         return None, f"Error: {e}", dash.no_update
 
 # ── Callback : slider labels ──────────────────────────────────
@@ -297,17 +300,15 @@ def run_pde(_, calib, option_type, K, T, r, sigma_override, Ns, Nt):
     S_spot = calib["S"]
     sigma  = float(sigma_override) if sigma_override else calib["sigma"]
     K      = float(K);  T = float(T);  r = float(r)
-    Smax   = max(4 * K, 4 * S_spot)
+    Smax_factor = 4.0
+    Smax = max(Smax_factor * K, Smax_factor * S_spot)
 
     S_grid, t_grid, V_all = solve_bs(Smax, K, T, r, sigma, Ns, Nt, option_type)
     dS = Smax / Ns
 
     V0     = V_all[0]
     V_anal = bs_price(S_grid, K, T, r, sigma, option_type)
-    delta  = np.full_like(V0, np.nan)
-    gamma  = np.full_like(V0, np.nan)
-    delta[1:-1] = (V0[2:] - V0[:-2]) / (2*dS)
-    gamma[1:-1] = (V0[2:] - 2*V0[1:-1] + V0[:-2]) / dS**2
+    delta, gamma, _ = compute_greeks(S_grid, V_all, dS, t_grid[1] - t_grid[0])
 
     idx_atm = int(np.argmin(np.abs(S_grid - S_spot)))
 

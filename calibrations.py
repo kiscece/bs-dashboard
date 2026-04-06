@@ -6,12 +6,29 @@ from scipy.optimize import minimize_scalar
 from datetime import datetime
 
 
-# ─────────────────────────────────────────────
 #  Analytical BS — used inside the optimiser
-# ─────────────────────────────────────────────
 
-def bs_price(S, K, T, r, sigma, option_type="call"): #Closed-form Black-Scholes price. Vectorised over K.
-    """Closed-form Black-Scholes price. Vectorised over K."""
+def bs_price(S, K, T, r, sigma, option_type="call") -> float: 
+    """
+    Compute the Black-Scholes price for European options.
+
+    Parameters:
+        S : float or array
+            Spot price of the underlying
+        K : float or array
+            Strike price
+        T : float
+            Time to maturity (in years)
+        r : float
+            Risk-free interest rate
+        sigma : float
+            Volatility
+        option_type : str
+            "call" or "put"
+
+    Returns:
+        Option price (same shape as K)
+    """
     S, K = np.asarray(S, float), np.asarray(K, float)
     with np.errstate(divide="ignore", invalid="ignore"):
         d1 = np.where(
@@ -26,11 +43,21 @@ def bs_price(S, K, T, r, sigma, option_type="call"): #Closed-form Black-Scholes 
         return np.where(S > 0, K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1), K * np.exp(-r * T))
 
 
-# ─────────────────────────────────────────────
 #  Data fetching & cleaning
-# ─────────────────────────────────────────────
 
 def fetch_and_calibrate(ticker, min_days=7):
+    """
+    Fetch option chain data using yfinance and calibrate a flat volatility.
+
+    Steps:
+    - Select nearest valid expiry
+    - Clean option data (remove illiquid quotes)
+    - Compute per-strike implied volatilities
+    - Calibrate a single volatility via least squares
+
+    Returns:
+        dict with calibrated parameters and cleaned datasets
+    """
     stock  = yf.Ticker(ticker)
     S      = stock.fast_info["last_price"]
     today_midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -42,7 +69,7 @@ def fetch_and_calibrate(ticker, min_days=7):
             if days >= min_days:
                 valid.append(e)
         except (ValueError, TypeError):
-            continue   # skip anything that isn't a proper date string
+            continue 
 
     if not valid:
         raise ValueError("No valid expiries found")
@@ -50,7 +77,7 @@ def fetch_and_calibrate(ticker, min_days=7):
     expiry = valid[0]
     T      = (datetime.strptime(expiry, "%Y-%m-%d") - today_midnight).days / 365.0
     chain  = stock.option_chain(expiry)
-    r      = 0.05
+    r      = 0.05 # constant risk-free rate 
 
     def clean(df, otype):
         df = df.copy()
@@ -64,7 +91,7 @@ def fetch_and_calibrate(ticker, min_days=7):
             df["lastPrice"]
         )
 
-        df = df[df["mid"] > 0]   # ← replaces df[df["bid"] > 0]
+        df = df[df["mid"] > 0]  
         df = df[(df["ask"] - df["bid"]).abs() / df["mid"].clip(lower=0.01) < 0.5]
         df = df[(df["strike"] > 0.6*S) & (df["strike"] < 1.4*S)]
         intr = np.maximum(S - df["strike"], 0) if otype == "call" else np.maximum(df["strike"] - S, 0)
@@ -78,6 +105,8 @@ def fetch_and_calibrate(ticker, min_days=7):
 
     # per-strike IV
     def iv_single(mkt, K, T, otype):
+        # Solve implied volatility by minimizing squared pricing error
+        # (bounded scalar optimization for robustness)
         obj = lambda s: (bs_price(float(S), float(K), float(T), float(r), s, otype) - mkt)**2
         res = minimize_scalar(obj, bounds=(1e-4, 5.0), method="bounded")
         return res.x if res.fun < 1e-4 else np.nan
@@ -91,6 +120,7 @@ def fetch_and_calibrate(ticker, min_days=7):
 
     # flat sigma calibration
     def mse(sigma):
+        # Objective: mean squared error between model and market prices
         p = np.array([
             bs_price(float(row.S), float(row.strike), float(row["T"]),
                     float(row.r), sigma, row.type)
@@ -105,9 +135,8 @@ def fetch_and_calibrate(ticker, min_days=7):
                 sigma=sigma_cal, calls=calls, puts=puts,
                 n_calls=len(calls), n_puts=len(puts))
 
-# ─────────────────────────────────────────────
+
 #  Per-strike implied volatility
-# ─────────────────────────────────────────────
 
 def implied_vol_single(market_price, S, K, T, r, option_type="call", tol=1e-6):
     """
@@ -120,7 +149,7 @@ def implied_vol_single(market_price, S, K, T, r, option_type="call", tol=1e-6):
     try:
         result = minimize_scalar(objective, bounds=(1e-4, 5.0), method="bounded",
                                  options={"xatol": tol})
-        if result.fun < 1e-6:   # residual small enough → good fit
+        if result.fun < 1e-6:  
             return result.x
         return np.nan
     except Exception:
@@ -140,9 +169,7 @@ def compute_iv_surface(df):
     return df.dropna(subset=["iv"])
 
 
-# ─────────────────────────────────────────────
 #  Flat vol calibration (single sigma for all strikes)
-# ─────────────────────────────────────────────
 
 def calibrate_flat_vol(df):
     """
