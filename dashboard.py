@@ -24,193 +24,9 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import traceback
 
-
-# ══════════════════════════════════════════════════════════════
-#  BLACK-SCHOLES CORE
-# ══════════════════════════════════════════════════════════════
-
-def bs_price(S, K, T, r, sigma, option_type="call"):
-    S, K = np.asarray(S, float), np.asarray(K, float)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        d1 = np.where(
-            (S > 0) & (T > 0) & (sigma > 0),
-            (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T)),
-            -np.inf,
-        )
-    d2 = d1 - sigma * np.sqrt(T)
-    if option_type == "call":
-        return np.where(S > 0, S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2), 0.0)
-    else:
-        return np.where(S > 0, K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1), K * np.exp(-r * T))
-
-
-# ══════════════════════════════════════════════════════════════
-#  RANNACHER PDE SOLVER
-# ══════════════════════════════════════════════════════════════
-
-def _build_implicit(S, dS, dt, r, sigma):
-    M = len(S) - 2
-    lo, ma, up = np.zeros(M-1), np.zeros(M), np.zeros(M-1)
-    for k in range(M):
-        i = k + 1
-        diff = 0.5 * sigma**2 * S[i]**2 / dS**2
-        conv = 0.5 * r * S[i] / dS
-        ma[k] = 1.0 + dt * (2.0 * diff + r)
-        if k > 0:   lo[k-1] = -dt * (diff - conv)
-        if k < M-1: up[k]   = -dt * (diff + conv)
-    return diags([lo, ma, up], [-1, 0, 1], format="csr")
-
-
-def _build_cn(S, dS, dt, r, sigma):
-    M = len(S) - 2
-    li, mi, ui = np.zeros(M-1), np.zeros(M), np.zeros(M-1)
-    le, me, ue = np.zeros(M-1), np.zeros(M), np.zeros(M-1)
-    for k in range(M):
-        i = k + 1
-        diff = 0.5 * sigma**2 * S[i]**2 / dS**2
-        conv = 0.5 * r * S[i] / dS
-        mi[k] = 1.0 + (dt/2) * (2*diff + r);  me[k] = 1.0 - (dt/2) * (2*diff + r)
-        if k > 0:
-            li[k-1] = -(dt/2)*(diff-conv);    le[k-1] =  (dt/2)*(diff-conv)
-        if k < M-1:
-            ui[k]   = -(dt/2)*(diff+conv);    ue[k]   =  (dt/2)*(diff+conv)
-    return (diags([li, mi, ui], [-1,0,1], format="csr"),
-            diags([le, me, ue], [-1,0,1], format="csr"))
-
-
-def _cg(A, b, tol=1e-10, maxiter=2000):
-    if np.allclose(b, 0): return np.zeros_like(b)
-    x, r, p = np.zeros(len(b)), b.copy(), b.copy()
-    rr = np.dot(r, r)
-    for _ in range(maxiter):
-        Ap = A @ p
-        alpha = rr / np.dot(p, Ap)
-        x += alpha * p;  r -= alpha * Ap
-        rr_new = np.dot(r, r)
-        if np.sqrt(rr_new) / np.linalg.norm(b) < tol: return x
-        p = r + (rr_new / rr) * p;  rr = rr_new
-    raise ValueError("CG did not converge")
-
-
-def _bc(S, K, T, r, t, option_type):
-    tau, Smax = T - t, S[-1]
-    if option_type == "call":
-        return 0.0, max(Smax - K * np.exp(-r * tau), 0.0)
-    return K * np.exp(-r * tau), 0.0
-
-
-def _add_bc(b, S, dS, dt, r, sigma, vl, vr, theta):
-    dl = 0.5*sigma**2*S[1]**2/dS**2;   cl = 0.5*r*S[1]/dS
-    dr = 0.5*sigma**2*S[-2]**2/dS**2;  cr = 0.5*r*S[-2]/dS
-    b[0]  += theta * dt * (dl - cl) * vl
-    b[-1] += theta * dt * (dr + cr) * vr
-
-
-def solve_bs(Smax, K, T, r, sigma, Ns, Nt, option_type="call", n_rannacher=2):
-    dS = Smax / Ns;  dt = T / Nt
-    S  = np.linspace(0, Smax, Ns+1)
-    V  = np.maximum(S - K, 0) if option_type == "call" else np.maximum(K - S, 0)
-    V_all = np.zeros((Nt+1, Ns+1));  V_all[Nt] = V
-
-    A_fi = _build_implicit(S, dS, dt, r, sigma)
-    A_ci, A_ce = _build_cn(S, dS, dt, r, sigma)
-
-    for step in reversed(range(Nt)):
-        t_now, t_next = step*dt, (step+1)*dt
-        vl0, vr0 = _bc(S, K, T, r, t_now,  option_type)
-        vl1, vr1 = _bc(S, K, T, r, t_next, option_type)
-        Vi = V[1:-1].copy()
-
-        if (Nt - 1 - step) < n_rannacher:
-            b = Vi.copy();  _add_bc(b, S, dS, dt, r, sigma, vl0, vr0, 1.0)
-            Vn = _cg(A_fi, b)
-        else:
-            b = A_ce @ Vi
-            _add_bc(b, S, dS, dt, r, sigma, vl0, vr0, 0.5)
-            _add_bc(b, S, dS, dt, r, sigma, vl1, vr1, 0.5)
-            Vn = _cg(A_ci, b)
-
-        V[0], V[-1], V[1:-1] = vl0, vr0, Vn
-        V_all[step] = V.copy()
-
-    return S, np.linspace(0, T, Nt+1), V_all
-
-
-# ══════════════════════════════════════════════════════════════
-#  CALIBRATION
-# ══════════════════════════════════════════════════════════════
-
-def fetch_and_calibrate(ticker, min_days=7):
-    stock  = yf.Ticker(ticker)
-    S      = stock.fast_info["last_price"]
-    print("Raw options:", stock.options)   # add this temporarily
-    print("Types:", [type(e) for e in stock.options])
-    today_midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-
-    valid = []
-    for e in stock.options:
-        try:
-            days = (datetime.strptime(e, "%Y-%m-%d") - today_midnight).days
-            if days >= min_days:
-                valid.append(e)
-        except (ValueError, TypeError):
-            continue   # skip anything that isn't a proper date string
-
-    if not valid:
-        raise ValueError("No valid expiries found")
-
-    expiry = valid[0]
-    T      = (datetime.strptime(expiry, "%Y-%m-%d") - today_midnight).days / 365.0
-    chain  = stock.option_chain(expiry)
-    r      = 0.05
-
-    def clean(df, otype):
-        df = df.copy()
-        for col in ["bid", "ask", "strike"]:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-        print("After conversion:", df.dtypes)
-        df["mid"] = (df["bid"] + df["ask"]) / 2
-        df = df[df["bid"] > 0]
-        df = df[(df["ask"] - df["bid"]) / df["mid"] < 0.5]
-        df = df[(df["strike"] > 0.8*S) & (df["strike"] < 1.2*S)]
-        intr = np.maximum(S - df["strike"], 0) if otype == "call" else np.maximum(df["strike"] - S, 0)
-        df = df[df["mid"] > intr + 0.01]
-        df["T"] = T;  df["S"] = S;  df["r"] = r;  df["type"] = otype
-        return df[["strike","mid","T","S","r","type"]].reset_index(drop=True)
-
-    calls = clean(chain.calls, "call")
-    puts  = clean(chain.puts,  "put")
-    all_opts = pd.concat([calls, puts], ignore_index=True)
-
-    # per-strike IV
-    def iv_single(mkt, K, T, otype):
-        obj = lambda s: (bs_price(float(S), float(K), float(T), float(r), s, otype) - mkt)**2
-        res = minimize_scalar(obj, bounds=(1e-4, 5.0), method="bounded")
-        return res.x if res.fun < 1e-4 else np.nan
-
-    for df in [calls, puts]:
-        df["iv"] = [iv_single(row.mid, row.strike, row["T"], row.type)
-            for _, row in df.iterrows()]
-
-    calls = calls.dropna(subset=["iv"])
-    puts  = puts.dropna(subset=["iv"])
-
-    # flat sigma calibration
-    def mse(sigma):
-        p = np.array([
-            bs_price(float(row.S), float(row.strike), float(row["T"]),
-                    float(row.r), sigma, row.type)
-            for _, row in all_opts.iterrows()
-            ])
-        return np.mean((p - all_opts["mid"].values)**2)
-
-    res = minimize_scalar(mse, bounds=(0.01, 2.0), method="bounded")
-    sigma_cal = res.x
-
-    return dict(S=S, T=T, r=r, expiry=expiry,
-                sigma=sigma_cal, calls=calls, puts=puts,
-                n_calls=len(calls), n_puts=len(puts))
-
+from bs_solver import solve_bs
+from calibrations import fetch_and_calibrate, bs_price
+from greeks import compute_greeks
 
 # ══════════════════════════════════════════════════════════════
 #  DASH APP
@@ -218,6 +34,7 @@ def fetch_and_calibrate(ticker, min_days=7):
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.FLATLY],
                 title="BS Dashboard")
+server = app.server  # Expose the Flask server instance
 
 # ── Colour palette ───────────────────────────────────────────
 C = dict(bg="#0f1117", card="#1a1d27", border="#2a2d3e",
@@ -438,7 +255,7 @@ def metric_card(label, value, color=None):
 )
 def run_calibration(_, ticker):
     try:
-        res = fetch_and_calibrate(ticker.upper().strip())
+        res = fetch_and_calibrate(ticker.upper().strip(), min_days=30)
         status = (f"Calibrated  σ = {res['sigma']*100:.1f}%  |  "
                   f"{res['n_calls']} calls, {res['n_puts']} puts  |  "
                   f"expiry {res['expiry']}")
@@ -649,7 +466,3 @@ if __name__ == "__main__":
     app.run(debug=False)
 
 
-#Acces the flash server directly
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.FLATLY],
-                title="BS Dashboard")
-server = app.server  # Expose the Flask server instance
