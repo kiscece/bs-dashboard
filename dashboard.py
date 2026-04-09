@@ -6,6 +6,7 @@ Features:
 - Market calibration (via Yahoo Finance)
 - Volatility smile visualization
 - Greeks computation
+- Mobile responsive layout
 
 Run:
     python dashboard.py
@@ -35,7 +36,9 @@ from greeks import compute_greeks
 # ══════════════════════════════════════════════════════════════
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.FLATLY],
-                title="BS Dashboard")
+                title="BS Dashboard",
+                meta_tags=[{"name": "viewport",
+                            "content": "width=device-width, initial-scale=1"}])
 server = app.server  # Expose the Flask server instance
 
 # ── Colour palette ───────────────────────────────────────────
@@ -60,6 +63,31 @@ btn_style = dict(background=C["accent"], border="none", borderRadius="8px",
                  fontSize="14px", cursor="pointer", width="100%",
                  letterSpacing="0.04em")
 
+MOBILE_CSS = """
+body { background: #0f1117; }
+ 
+@media (max-width: 768px) {
+    .main-padding { padding: 16px !important; }
+    .main-header h1, .main-header span { font-size: 20px !important; }
+    .main-header p { font-size: 11px !important; }
+    .metric-grid { grid-template-columns: repeat(2, 1fr) !important; }
+}
+ 
+@media (max-width: 480px) {
+    .metric-grid { grid-template-columns: repeat(2, 1fr) !important; }
+}
+"""
+ 
+tab_style = dict(background="transparent", color=C["muted"],
+                 border="none", padding="10px 14px", fontSize="13px")
+ 
+tab_selected = dict(background=C["card"], color=C["accent"],
+                    border=f"1px solid {C['border']}",
+                    borderRadius="8px 8px 0 0",
+                    padding="10px 14px", fontSize="13px")
+ 
+GRAPH_STYLE = dict(height="clamp(280px, 45vw, 440px)")
+
 app.layout = html.Div(style=dict(background=C["bg"], minHeight="100vh",
                                   fontFamily="'DM Sans', sans-serif",
                                   color=C["text"], padding="32px"), children=[
@@ -79,10 +107,11 @@ app.layout = html.Div(style=dict(background=C["bg"], minHeight="100vh",
                style=dict(color=C["muted"], fontSize="13px", margin="4px 0 0")),
     ]),
 
-    dbc.Row([
+    
+    dbc.Row(className = "g-3", children=[
 
         # ── Left panel : inputs ───────────────────────────────
-        dbc.Col(width=3, children=[
+        dbc.Col(xs = 12, lg = 3, children=[
             html.Div(style=card_style, children=[
                 html.P("Market data", style={**label_style, "marginBottom":"14px",
                        "color": C["accent"], "fontSize":"11px"}),
@@ -160,7 +189,7 @@ app.layout = html.Div(style=dict(background=C["bg"], minHeight="100vh",
             # Metric cards row
             html.Div(id="metrics-row", style=dict(
                 display="grid",
-                gridTemplateColumns="repeat(4, 1fr)",
+                gridTemplateColumns="repeat(auto-fit, minmax(130px, 1fr))",
                 gap="12px", marginBottom="16px"
             )),
 
