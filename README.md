@@ -7,6 +7,8 @@ Most option pricing tools either use the closed-form Black-Scholes formula direc
 
 The volatility parameter $\sigma$ is not chosen arbitrarily. It is calibrated from **real market data** : the dashboard downloads live option chains from Yahoo Finance, computes the implied volatility of each traded option, and finds the flat $\sigma$ that best fits observed market prices in the least-square sense. 
 
+The model price is then compared directly against real traded prices across all available strikes, exposing the systematic mismatch that a flat-$\sigma$ model produces, and making the volatility smile visible as a pricing error pattern.
+
 ---
 
 ## The Mathematics 
@@ -36,8 +38,12 @@ For each traded option with market price $C_{mkt}$ we find the implied volatilit
 via Brent's method. The flat calibrated $\sigma$ minimises the mean squared error across all strikes :  
 >$\sigma^{*} = \argmin{\left[ \sum (BS(S, K_i, T, r, \sigma) - C_{mkt,i})^2 \right]} $
 
---- 
 
+### Market comparison
+
+Once calibrated, the model price is compared against every traded strike in the option chain. The signed error (model - market) reveals the volatility smile structure directly : puts are systematically underpriced by a flat-$\sigma$ model (negative error) while OTM calls are overpriced (positive error). This is a direct empirical demonstration of why models like Heston or local volatility are needed in practise. 
+
+---
 ## Features 
 - **Rannacher PDE solver** : second-order accurate in time and space, oscillation-free  
 - **Live market calibration** : fetches real option chains from Yahoo Finance  
@@ -45,9 +51,11 @@ via Brent's method. The flat calibrated $\sigma$ minimises the mean squared erro
 - **Volatility smile** : per-strike implied volatility vs moneyness  
 - **3D price surface** : V(S,t) rendered as an interactive surface  
 - **Greeks** : Delta and Gamma computed by fine differences on the grid  
+- **Model vs market** : direct comparison against real traded prices with signed error and RMSE
 - **Convergence Analysis** : empirical verification of second-order convergence  
 - **Works outside market hours** : falls back to last traded prices automatically  
 - **Global markets** : supports any ticker on Yahoo Finance (US, European, Asian) 
+- **Mobile responsive** : works on phones and tablets
 
 ---
 
@@ -56,7 +64,8 @@ via Brent's method. The flat calibrated $\sigma$ minimises the mean squared erro
 | Market | Examples |
 |--------|---------|
 | US | AAPL, TSLA, META, NVDA, SPY |
-| Europe | MC.PA (LVMH), AIR.PA (Airbus), ASML.AS (ASML) |
+| Europe (ADR) | ASML, AZN, SHEL, UL |
+| Europe (ETF)| EWG (Germany), EWQ (France), FEZ (Euro Stoxx 50) |
 | Asia | 9984.T (SoftBank), 0700.HK (Tencent), 005930.KS (Samsung) |
 
 ---
@@ -93,6 +102,7 @@ gunicorn
 ├── bs_solver.py      # Rannacher PDE solver + CG solver
 ├── calibrations.py   # Market data fetching + IV calibration
 ├── greeks.py         # Delta, Gamma, Theta
+├── market_comparison.py #Model vs market
 ├── convergence.py    # Convergence analysis vs analytical solution
 ├── requirements.txt
 └── render.yaml       # Render deployment config
@@ -105,7 +115,7 @@ gunicorn
 1. Enter a ticker and click **Fetch & Calibrate**, it then downloads live data and calibrates $\sigma$  
 2. Adjust strike $K$, maturity $T$, and grid resolution with the sliders  
 3. Click **Run PDE Solver**, it solves the PDE with the calibrated $\sigma$  
-4. Explore the four tabs : volatility smile, price surface, price vs analytical, Greeks.  
+4. Explore the tabs : volatility smile, price surface, price vs analytical, Greeks, Mkt vs Model. 
 
 --- 
 

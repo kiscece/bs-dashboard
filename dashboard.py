@@ -30,6 +30,8 @@ import traceback
 from bs_solver import solve_bs
 from calibrations import fetch_and_calibrate, bs_price
 from greeks import compute_greeks
+from market_comparison import compare_markets
+
 
 # ══════════════════════════════════════════════════════════════
 #  DASH APP
@@ -45,7 +47,8 @@ server = app.server  # Expose the Flask server instance
 C = dict(bg="#0f1117", card="#1a1d27", border="#2a2d3e",
          accent="#00d4aa", accent2="#7c6af7",
          text="#e8eaf0", muted="#8b90a0",
-         call="#4fc3f7", put="#f48fb1", model="#00d4aa")
+         call="#4fc3f7", put="#f48fb1", model="#00d4aa",
+         plot = "#004524")
 
 card_style = dict(background=C["card"], border=f"1px solid {C['border']}",
                   borderRadius="12px", padding="20px", marginBottom="16px")
@@ -233,6 +236,8 @@ app.layout = html.Div(style=dict(background=C["bg"], minHeight="100vh",
                                                 border=f"1px solid {C['border']}",
                                                 borderRadius="8px 8px 0 0",
                                                 padding="10px 20px")),
+                    dcc.Tab(label="Mkt vs model", value="mktcomp",
+                            style=tab_style, selected_style=tab_selected),
                 ]),
 
             html.Div(id="tab-content",
@@ -447,11 +452,11 @@ def render_tab(tab, calib, pde):
 
         fig = make_subplots(rows=1, cols=2,
                             subplot_titles=["Price at t=0", "Absolute error"])
-        fig.add_trace(go.Scatter(x=S[mask], y=Va[mask], name="Analytical",
-                                 line=dict(color=C["muted"], dash="dash", width=1.5)),
-                      row=1, col=1)
         fig.add_trace(go.Scatter(x=S[mask], y=V0[mask], name="Rannacher",
                                  line=dict(color=C["accent"], width=2)),
+                      row=1, col=1)
+        fig.add_trace(go.Scatter(x=S[mask], y=Va[mask], name="Analytical",
+                                 line=dict(color=C["plot"], dash="dash", width=2.5)),
                       row=1, col=1)
         fig.add_trace(go.Scatter(x=S[mask], y=err[mask], name="| error |",
                                  fill="tozeroy",
@@ -486,6 +491,84 @@ def render_tab(tab, calib, pde):
         fig.update_yaxes(gridcolor=C["border"])
         return dcc.Graph(figure=fig_layout(fig), config={"displayModeBar": False},
                          style=dict(height="440px")), metrics
+    
+    if tab == "mktcomp":
+        if calib is None:
+            return empty_msg("Fetch market data first.")
+    
+        # Reconstruct calib with lists not DataFrames
+        calib_copy = dict(calib)
+        calib_copy["calls"] = calib["calls"]   # already records
+        calib_copy["puts"]  = calib["puts"]
+    
+        df = compare_markets(calib_copy,
+                                    np.array(pde["S"]) if pde else None,
+                                    np.array(pde["V0"]) if pde else None)
+    
+        calls_df = df[df["option_type"] == "call"]
+        puts_df  = df[df["option_type"] == "put"]
+    
+        fig = make_subplots(
+            rows=2, cols=1,
+            subplot_titles=["Market price vs model price",
+                            "Error by strike  (model − market)"],
+            row_heights=[0.6, 0.4],
+            vertical_spacing=0.25
+        )
+    
+        # ── Top panel : prices ────────────────────────────────────
+        for df_opt, mcolor, lcolor, label in [
+            (calls_df, C["call"], C["call"], "Calls"),
+            (puts_df,  C["put"],  C["put"],  "Puts")
+        ]:
+            fig.add_trace(go.Scatter(
+                x=df_opt["strike"], y=df_opt["market_price"],
+                mode="markers", name=f"{label} market",
+                marker=dict(color=mcolor, size=8, symbol="circle")),
+                row=1, col=1)
+            fig.add_trace(go.Scatter(
+                x=df_opt["strike"], y=df_opt["model_price"],
+                mode="lines+markers", name=f"{label} model",
+                marker=dict(color=mcolor, size=5, symbol="x"),
+                line=dict(color=mcolor, width=1.5, dash="dash")),
+                row=1, col=1)
+    
+        # ── Bottom panel : error bars ─────────────────────────────
+        fig.add_trace(go.Bar(
+            x=df["strike"], y=df["error"],
+            marker_color=[C["call"] if t == "call" else C["put"]
+                        for t in df["option_type"]],
+            name="Error", showlegend=False),
+            row=2, col=1)
+        fig.add_hline(y=0, line_color=C["muted"],
+                    line_width=1, row=2, col=1)
+    
+        # ── Summary metrics ───────────────────────────────────────
+        rmse = float(np.sqrt((df["error"]**2).mean()))
+        max_err = float(df["error"].abs().max())
+    
+        summary = html.Div(style=dict(
+            display="flex", gap="16px",
+            marginBottom="12px", flexWrap="wrap"), children=[
+            html.Span(f"RMSE : ${rmse:.4f}",
+                    style=dict(color=C["accent"], fontSize="13px",
+                                fontFamily="DM Mono")),
+            html.Span(f"Max error : ${max_err:.4f}",
+                    style=dict(color=C["put"], fontSize="13px",
+                                fontFamily="DM Mono")),
+            html.Span(f"Strikes : {len(df)}",
+                    style=dict(color=C["muted"], fontSize="13px")),
+        ])
+    
+        fig.update_xaxes(title_text="Strike K", gridcolor=C["border"])
+        fig.update_yaxes(gridcolor=C["border"])
+    
+        return html.Div([
+            summary,
+            dcc.Graph(figure=fig_layout(fig),
+                    config={"displayModeBar": False},
+                    style=GRAPH_STYLE)
+        ]), metrics
 
     return html.Div(), metrics
 
