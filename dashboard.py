@@ -94,7 +94,7 @@ app.layout = html.Div(style=dict(background=C["bg"], minHeight="100vh",
 
     html.Link(rel="stylesheet",
           href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono&display=swap"),
-
+    html.Style(MOBILE_CSS),
     # ── Header ───────────────────────────────────────────────
     html.Div(style=dict(marginBottom="32px"), children=[
         html.Div(style=dict(display="flex", alignItems="baseline", gap="12px"), children=[
@@ -404,7 +404,7 @@ def render_tab(tab, calib, pde):
         fig.update_yaxes(title="Implied volatility (%)")
         return dcc.Graph(figure=fig_layout(fig, "Volatility smile"),
                          config={"displayModeBar": False},
-                         style=dict(height="440px")), metrics
+                        style=GRAPH_STYLE), metrics
 
     # ── PDE surface ───────────────────────────────────────────
     if tab == "surface":
@@ -433,7 +433,7 @@ def render_tab(tab, calib, pde):
             margin=dict(l=0, r=0, t=30, b=0),
         )
         return dcc.Graph(figure=fig, config={"displayModeBar": False},
-                         style=dict(height="440px")), metrics
+                         style=GRAPH_STYLE), metrics
 
     # ── Price & error ─────────────────────────────────────────
     if tab == "price":
@@ -462,7 +462,7 @@ def render_tab(tab, calib, pde):
         fig.update_yaxes(title_text="V", gridcolor=C["border"], row=1, col=1)
         fig.update_yaxes(title_text="|error|", gridcolor=C["border"], row=1, col=2)
         return dcc.Graph(figure=fig_layout(fig), config={"displayModeBar": False},
-                         style=dict(height="440px")), metrics
+                         style=GRAPH_STYLE), metrics
 
     # ── Greeks ────────────────────────────────────────────────
     if tab == "greeks":
@@ -485,7 +485,7 @@ def render_tab(tab, calib, pde):
         fig.update_xaxes(title_text="S", gridcolor=C["border"])
         fig.update_yaxes(gridcolor=C["border"])
         return dcc.Graph(figure=fig_layout(fig), config={"displayModeBar": False},
-                         style=dict(height="440px")), metrics
+                         style=GRAPH_STYLE), metrics
 
     return html.Div(), metrics
 
@@ -494,5 +494,3 @@ if __name__ == "__main__":
     print("\n  Black-Scholes Dashboard")
     print("  Open http://localhost:8050 in your browser\n")
     app.run(debug=False)
-
-
